@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { createPiece } from './pieces.js';
 
 // Debug tools (dat.gui panel, spotlight helper) load only with ?debug in the URL.
 const DEBUG = new URLSearchParams(window.location.search).has('debug');
@@ -17,7 +18,7 @@ const board = new URL('../img/chess-board.jpg', import.meta.url).href;
 const BOARD_SIZE = 24;                          // world units per board side
 const GRID_DIVISIONS = 8;                       // cells per side
 const CELL_SIZE = BOARD_SIZE / GRID_DIVISIONS;  // world units per cell
-const PIECE_SIZE = CELL_SIZE * 0.8;             // pieces leave a small gap inside their cell
+const PIECE_SIZE = CELL_SIZE * 0.8;             // one piece unit (pieces.js); bases leave a gap inside the cell
 
 // Grid index (0..7) -> world coordinate of that cell's center.
 const cellCenter = (i) => -BOARD_SIZE / 2 + CELL_SIZE * (i + 0.5);
@@ -114,8 +115,7 @@ orbit.update();
 // Pieces
 // ---------------------------------------------------------------------------
 
-// Movable pieces, each one cell-sized and snapped to a cell center.
-const boxGeometry = new THREE.BoxGeometry(PIECE_SIZE, PIECE_SIZE, PIECE_SIZE); // shared by all pieces
+// Movable pieces from createPiece(), each snapped to a cell center.
 const pieces = []; // every piece mesh, used only for raycasting; lookups go through the grid
 
 // The board's source of truth: grid[row][col] holds the mesh on that square, or null.
@@ -167,7 +167,7 @@ function placeOnSquare(mesh, square) {
 // Draw a mesh centered on a square, resting on the board, without touching the grid (used mid-drag).
 function showOnSquare(mesh, square) {
     const { col, row } = squareToCell(square);
-    mesh.position.set(cellCenter(col), PIECE_SIZE / 2, cellCenter(row));
+    mesh.position.set(cellCenter(col), 0, cellCenter(row)); // piece origins sit at their base
 }
 
 // Move the piece on `from` to `to`, taking whatever was on `to` out of the scene (a capture).
@@ -184,20 +184,23 @@ export function movePiece(from, to) {
     placeOnSquare(mesh, to);
 }
 
-// Create a piece; its base color is kept in userData so hover/select tints can be undone.
-function addPiece(color, square) {
-    const piece = new THREE.Mesh(boxGeometry, new THREE.MeshBasicMaterial({ color }));
-    piece.userData.color = color;
+// Create a piece (type and color as chess.js letters); createPiece keeps its base color in userData for tints.
+function addPiece(type, color, square) {
+    const piece = createPiece(type, color, PIECE_SIZE);
     placeOnSquare(piece, square);
     scene.add(piece);
     pieces.push(piece);
 }
 
-addPiece(0x00FF00, 'd5');
-addPiece(0xFF0000, 'a1');
-addPiece(0x0000FF, 'h8');
-addPiece(0xFF00FF, 'c3');
-addPiece(0x00FFFF, 'f6');
+// Starting position.
+for (let col = 0; col < GRID_DIVISIONS; col++) {
+    const file = FILES[col];
+    const back = 'rnbqkbnr'[col];
+    addPiece(back, 'w', file + 1);
+    addPiece('p', 'w', file + 2);
+    addPiece('p', 'b', file + 7);
+    addPiece(back, 'b', file + 8);
+}
 
 // ---------------------------------------------------------------------------
 // Board
@@ -229,6 +232,11 @@ scene.add(gridHelper);
 // Dim fill light so unlit sides aren't pitch black.
 const ambientLight = new THREE.AmbientLight(0x333333);
 scene.add(ambientLight);
+
+// Basic key light so the pieces' shapes read; #411 replaces this lighting setup.
+const keyLight = new THREE.DirectionalLight(0xFFFFFF, 2.5);
+keyLight.position.set(-10, 25, 15);
+scene.add(keyLight);
 
 // Main light (Phase 2 replaces it with a directional key light).
 const spotlight = new THREE.SpotLight(0xFFFFFF);
