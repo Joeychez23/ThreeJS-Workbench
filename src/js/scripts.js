@@ -261,7 +261,7 @@ if (DEBUG) {
 }
 
 // ---------------------------------------------------------------------------
-// Mouse interaction: hover, grab and drag pieces
+// Pointer interaction: mouse hovers, grabs and drags; touch and pen tap (see the next section)
 // ---------------------------------------------------------------------------
 
 // The renderer knows no chess rules; the caller supplies them through setMoveHandlers():
@@ -328,7 +328,9 @@ function aimRay(e) {
 // Grab: left-click on a piece selects it (yellow) and freezes the camera.
 // Capture phase so this runs before OrbitControls' own pointerdown and can disable it.
 renderer.domElement.addEventListener('pointerdown', function(e) {
+    if (e.pointerType !== 'mouse') return touchDown(e); // fingers and pens tap instead of dragging
     if (e.button !== 0) return; // only left-click grabs blocks
+    deselectTap(); // the mouse takes over from any tap selection
     aimRay(e);
     const [hit] = rayCaster.intersectObjects(pieces, false);
     if (!hit) return; // missed: let OrbitControls pan as usual
@@ -344,6 +346,7 @@ renderer.domElement.addEventListener('pointerdown', function(e) {
 // Move: hover highlight when idle; while dragging, snap the piece to the square under the cursor if it's legal.
 // On window (not the canvas) so a drag keeps working if the mouse leaves the canvas.
 window.addEventListener('pointermove', function(e) {
+    if (e.pointerType !== 'mouse') return touchMove(e); // no hover or drag for touch and pen
     aimRay(e);
     if (!selected) {
         // Skip hover when the mouse is over the GUI or another element on top of the canvas.
@@ -360,7 +363,8 @@ window.addEventListener('pointermove', function(e) {
 });
 
 // Drop: put the piece back on its grid square, then report the move and let the caller apply it.
-window.addEventListener('pointerup', function() {
+window.addEventListener('pointerup', function(e) {
+    if (e.pointerType !== 'mouse') return touchUp(e);
     if (!selected) return;
     const from = dragFrom;
     const to = dragTo;
@@ -372,6 +376,88 @@ window.addEventListener('pointerup', function() {
     orbit.enabled = true;
     if (to !== from) onMove(from, to);
 });
+
+// ---------------------------------------------------------------------------
+// Touch and pen: tap a piece, then tap a square (like the 2D game)
+// ---------------------------------------------------------------------------
+
+// Only a short press that barely moves is a tap; anything else is left to OrbitControls as a camera gesture.
+const TAP_MAX_MOVE = 10;  // CSS px a finger may wander and still count as a tap
+const TAP_MAX_MS = 400;   // longer presses are camera gestures
+const activePointers = new Set(); // touch/pen pointers currently down; 2+ means pinch, never a tap
+let tapStart = null;      // { id, x, y, time } of the press that may become a tap
+let tapSelected = null;   // piece chosen by a tap, waiting for a target square
+
+// The canvas handles every touch itself: no browser scrolling, pinch-zoom, double-tap zoom or long-press menu.
+renderer.domElement.style.touchAction = 'none';
+renderer.domElement.style.webkitTouchCallout = 'none';
+renderer.domElement.style.userSelect = 'none';
+
+function touchDown(e) {
+    activePointers.add(e.pointerId);
+    tapStart = activePointers.size === 1 ? { id: e.pointerId, x: e.clientX, y: e.clientY, time: e.timeStamp } : null;
+}
+
+function touchMove(e) {
+    if (tapStart && e.pointerId === tapStart.id
+        && Math.hypot(e.clientX - tapStart.x, e.clientY - tapStart.y) > TAP_MAX_MOVE) tapStart = null;
+}
+
+function touchUp(e) {
+    activePointers.delete(e.pointerId);
+    const start = tapStart;
+    if (!start || e.pointerId !== start.id) return;
+    tapStart = null;
+    if (e.timeStamp - start.time > TAP_MAX_MS) return;
+    if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > TAP_MAX_MOVE) return;
+    handleTap(e);
+}
+
+// The browser took the pointer (e.g. a system gesture): forget it, and it's not a tap.
+window.addEventListener('pointercancel', function(e) {
+    activePointers.delete(e.pointerId);
+    if (tapStart && e.pointerId === tapStart.id) tapStart = null;
+});
+
+// What a tap landed on: a piece and its square, an empty board square, or nothing (off the board).
+function tapTarget(e) {
+    aimRay(e);
+    const [pieceHit] = rayCaster.intersectObjects(pieces, false);
+    if (pieceHit) return { piece: pieceHit.object, square: pieceHit.object.userData.square };
+    const [boardHit] = rayCaster.intersectObject(plane, false);
+    if (!boardHit) return { piece: null, square: null };
+    return { piece: null, square: cellToSquare(toCell(boardHit.point.x), toCell(boardHit.point.z)) };
+}
+
+// Tap a piece to select it; tap a legal square (empty or a capture) to move there.
+// Tapping the same piece or anywhere else deselects; tapping another movable piece switches to it.
+function handleTap(e) {
+    const { piece, square } = tapTarget(e);
+    if (tapSelected) {
+        const from = tapSelected.userData.square;
+        const again = piece === tapSelected;
+        const legal = square !== null && legalTargets.has(square);
+        deselectTap();
+        if (legal) return onMove(from, square);
+        if (again) return;
+    }
+    if (piece) selectByTap(piece);
+}
+
+// Select a piece only if canMove allows it somewhere, so pieces that can't move (e.g. the opponent's) ignore taps.
+function selectByTap(piece) {
+    showTargets(piece.userData.square);
+    if (legalTargets.size === 0) return;
+    tapSelected = piece;
+    piece.material.color.set(0xFFEA00);
+}
+
+function deselectTap() {
+    if (!tapSelected) return;
+    tapSelected.material.color.set(tapSelected.userData.color);
+    tapSelected = null;
+    showTargets(null);
+}
 
 // ---------------------------------------------------------------------------
 // Workbench rules stub (a real game passes chess.js-backed handlers instead)
