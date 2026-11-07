@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import * as materials from './materials.js';
 
 // Piece meshes built from code: Lathe for the round pieces, Extrude for the knight's head.
 // All geometry is in "piece units": 1 = PIECE_SIZE, base center at the origin, +Y up.
@@ -27,25 +28,40 @@ function box(w, h, d, x, y, z) {
     return new THREE.BoxGeometry(w, h, d).translate(x, y + h / 2, z);
 }
 
+// A thin ring of radius r at height y (gold collars and crowns).
+const ring = (r, y) => new THREE.TorusGeometry(r, 0.025, 6, SEGMENTS).rotateX(Math.PI / 2).translate(0, y, 0);
+
 // Stepped foot shared by every piece, ending at the radius where the stem starts.
 const foot = (r) => [[0, 0], [r, 0], [r, 0.06], [r - 0.05, 0.10], [r - 0.07, 0.14]];
 
-// Merge parts into one geometry (one mesh per piece keeps raycasting and tinting simple).
 const merge = (parts) => mergeGeometries(parts.map((g) => g.index ? g.toNonIndexed() : g));
 
+// A geometry with no groups draws nothing under a material array, so give it one wood group.
+function withGroup(geometry) {
+    if (geometry.groups.length === 0) geometry.addGroup(0, Infinity, 0);
+    return geometry;
+}
+
+// Builders return [woodParts, goldParts]: one geometry per piece keeps raycasting simple,
+// with group 0 drawn in wood and group 1 in gold (see createPiece).
+function build([wood, gold]) {
+    if (!gold) return withGroup(merge(wood));
+    return mergeGeometries([merge(wood), merge(gold)], true);
+}
+
 function pawn() {
-    return lathe([
+    return [[lathe([
         ...foot(0.34), [0.18, 0.18], [0.13, 0.42], [0.20, 0.46], [0.20, 0.48], [0.11, 0.52],
         ...arc(0, 0.66, 0.17, -55, 90, 8),
-    ]);
+    ])]];
 }
 
 function bishop() {
-    return lathe([
+    return [[lathe([
         ...foot(0.38), [0.20, 0.22], [0.13, 0.60], [0.21, 0.64], [0.21, 0.67], [0.12, 0.70],
         [0.16, 0.78], [0.17, 0.88], [0.14, 0.97], [0.09, 1.04], [0.04, 1.09],
         ...arc(0, 1.15, 0.05, -60, 90, 5),
-    ]);
+    ])], [ring(0.21, 0.655)]];
 }
 
 function rook() {
@@ -55,15 +71,15 @@ function rook() {
     // Four merlins around the rim.
     const merlins = [0, 1, 2, 3].map((i) =>
         box(0.11, 0.20, 0.08, 0, 1.12, 0.24).rotateY(i * Math.PI / 2 + Math.PI / 4));
-    return merge([body, ...merlins]);
+    return [[body, ...merlins]];
 }
 
 function queen() {
-    return lathe([
+    return [[lathe([
         ...foot(0.42), [0.22, 0.26], [0.14, 0.95], [0.24, 1.00], [0.24, 1.03], [0.15, 1.07],
         [0.19, 1.20], [0.25, 1.36], [0.22, 1.39], [0.08, 1.38],
         ...arc(0, 1.44, 0.08, -50, 90, 6),
-    ]);
+    ])], [ring(0.24, 1.015), ring(0.235, 1.375)]];
 }
 
 function king() {
@@ -71,7 +87,7 @@ function king() {
         ...foot(0.43), [0.23, 0.27], [0.15, 1.00], [0.25, 1.05], [0.25, 1.08], [0.16, 1.12],
         [0.20, 1.30], [0.22, 1.40], [0.14, 1.44], [0.06, 1.46], [0, 1.46],
     ]);
-    return merge([body, box(0.07, 0.24, 0.07, 0, 1.46, 0), box(0.18, 0.06, 0.07, 0, 1.56, 0)]);
+    return [[body], [ring(0.25, 1.065), box(0.07, 0.24, 0.07, 0, 1.46, 0), box(0.18, 0.06, 0.07, 0, 1.56, 0)]];
 }
 
 function knight() {
@@ -88,33 +104,41 @@ function knight() {
         depth, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 2,
     }).translate(0, 0, -depth / 2);
     // Bevel pushes the bottom edge below y = 0.18; that part hides inside the base.
-    return merge([base, head]);
+    return [[base, head]];
 }
 
 const builders = { p: pawn, n: knight, b: bishop, r: rook, q: queen, k: king };
 const geometries = {}; // built on first use and shared by every piece of that type
 
 // Hook for Blender .glb models (#437): pass a geometry in piece units (base center at the origin,
-// 1 = PIECE_SIZE, knight facing +X). Pieces created afterwards use it; callers don't change.
+// 1 = PIECE_SIZE, knight facing +X). Optional groups: 0 = wood, 1 = gold. Pieces created afterwards use it.
 export function setPieceGeometry(type, geometry) {
-    geometries[type] = geometry;
+    geometries[type] = withGroup(geometry);
 }
 
 export function pieceGeometry(type) {
     if (!builders[type]) throw new Error(`Bad piece type: ${type}`);
-    return geometries[type] ??= builders[type]();
+    return geometries[type] ??= build(builders[type]());
 }
 
-const COLORS = { w: 0xEEE6D8, b: 0x2B2B2B }; // placeholders until #409/#410 add the wood materials
+const WOODS = { w: 'maple', b: 'walnut' };
 
 // type: 'p' 'n' 'b' 'r' 'q' 'k' (chess.js letters), color: 'w' | 'b', size: world units per piece unit.
-// Each piece gets its own material so hover/select tints affect only it; userData.color holds its base color.
+// Materials are shared; highlights swap the wood material (setPieceState) instead of recoloring it.
 export function createPiece(type, color, size = 1) {
-    if (!COLORS[color]) throw new Error(`Bad piece color: ${color}`);
-    const mesh = new THREE.Mesh(pieceGeometry(type), new THREE.MeshStandardMaterial({ color: COLORS[color], roughness: 0.5 }));
+    const wood = WOODS[color];
+    if (!wood) throw new Error(`Bad piece color: ${color}`);
+    const mesh = new THREE.Mesh(pieceGeometry(type), [materials[wood], materials.gold]);
     mesh.scale.setScalar(size);
     if (color === 'b') mesh.rotation.y = Math.PI; // Black's knights face the other way
     mesh.userData.type = type;
-    mesh.userData.color = COLORS[color];
+    mesh.userData.wood = wood;
     return mesh;
+}
+
+// state: 'hover', 'selected' or null (normal).
+export function setPieceState(mesh, state) {
+    const wood = mesh.userData.wood;
+    mesh.material[0] = state === 'selected' ? materials.selected
+        : state === 'hover' ? materials.hovered[wood] : materials[wood];
 }

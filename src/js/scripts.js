@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { createPiece } from './pieces.js';
+import { createPiece, setPieceState } from './pieces.js';
 
 // Debug tools (dat.gui panel, spotlight helper) load only with ?debug in the URL.
 const DEBUG = new URLSearchParams(window.location.search).has('debug');
@@ -184,7 +184,7 @@ export function movePiece(from, to) {
     placeOnSquare(mesh, to);
 }
 
-// Create a piece (type and color as chess.js letters); createPiece keeps its base color in userData for tints.
+// Create a piece (type and color as chess.js letters).
 function addPiece(type, color, square) {
     const piece = createPiece(type, color, PIECE_SIZE);
     placeOnSquare(piece, square);
@@ -316,12 +316,12 @@ function showTargets(from) {
     }
 }
 
-// Hover: lighten the piece under the cursor and show a grab cursor.
+// Hover: brighten the piece under the cursor and show a grab cursor.
 function setHovered(piece) {
     if (hovered === piece) return;
-    if (hovered) hovered.material.color.set(hovered.userData.color);
+    if (hovered) setPieceState(hovered, null);
     hovered = piece;
-    if (hovered) hovered.material.color.set(hovered.userData.color).offsetHSL(0, 0, 0.25);
+    if (hovered) setPieceState(hovered, 'hover');
     renderer.domElement.style.cursor = hovered ? 'grab' : '';
 }
 
@@ -346,7 +346,7 @@ renderer.domElement.addEventListener('pointerdown', function(e) {
     selected = hit.object;
     dragFrom = dragTo = selected.userData.square;
     showTargets(dragFrom);
-    selected.material.color.set(0xFFEA00);
+    setPieceState(selected, 'selected');
     renderer.domElement.style.cursor = 'grabbing';
     orbit.enabled = false;
 }, { capture: true });
@@ -376,7 +376,7 @@ window.addEventListener('pointerup', function(e) {
     if (!selected) return;
     const from = dragFrom;
     const to = dragTo;
-    selected.material.color.set(selected.userData.color);
+    setPieceState(selected, null);
     showOnSquare(selected, selected.userData.square);
     showTargets(null);
     selected = dragFrom = dragTo = null;
@@ -457,12 +457,12 @@ function selectByTap(piece) {
     showTargets(piece.userData.square);
     if (legalTargets.size === 0) return;
     tapSelected = piece;
-    piece.material.color.set(0xFFEA00);
+    setPieceState(piece, 'selected');
 }
 
 function deselectTap() {
     if (!tapSelected) return;
-    tapSelected.material.color.set(tapSelected.userData.color);
+    setPieceState(tapSelected, null);
     tapSelected = null;
     showTargets(null);
 }
