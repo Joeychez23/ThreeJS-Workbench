@@ -161,7 +161,27 @@ function placeOnSquare(mesh, square) {
     if (mesh.userData.square) removeFrom(mesh.userData.square);
     grid[row][col] = mesh;
     mesh.userData.square = square;
-    mesh.position.set(cellCenter(col), PIECE_SIZE / 2, cellCenter(row)); // centered, resting on the board
+    showOnSquare(mesh, square);
+}
+
+// Draw a mesh centered on a square, resting on the board, without touching the grid (used mid-drag).
+function showOnSquare(mesh, square) {
+    const { col, row } = squareToCell(square);
+    mesh.position.set(cellCenter(col), PIECE_SIZE / 2, cellCenter(row));
+}
+
+// Move the piece on `from` to `to`, taking whatever was on `to` out of the scene (a capture).
+// The renderer never calls this on its own: the caller's onMove decides whether a move happens.
+export function movePiece(from, to) {
+    const mesh = removeFrom(from);
+    if (!mesh) return;
+    const captured = removeFrom(to);
+    if (captured) {
+        scene.remove(captured);
+        pieces.splice(pieces.indexOf(captured), 1);
+        if (hovered === captured) hovered = null;
+    }
+    placeOnSquare(mesh, to);
 }
 
 // Create a piece; its base color is kept in userData so hover/select tints can be undone.
@@ -244,11 +264,49 @@ if (DEBUG) {
 // Mouse interaction: hover, grab and drag pieces
 // ---------------------------------------------------------------------------
 
-// Drag-to-move: grab a piece, drag over the board, it snaps cell to cell.
+// The renderer knows no chess rules; the caller supplies them through setMoveHandlers():
+//   canMove(from, to) -> boolean  may the piece on `from` be dropped on `to`? (asked for every square on grab)
+//   onMove(from, to)              a piece was dropped on a square canMove allowed; the caller decides what
+//                                 happens, usually by calling movePiece(). Nothing changes on the board otherwise.
+let canMove = () => false;
+let onMove = () => {};
+export function setMoveHandlers(handlers) {
+    ({ canMove, onMove } = handlers);
+}
+
+// Drag-to-move: grab a piece, drag over the board, it snaps between the squares canMove allows.
 const rayCaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2(); // mouse position in normalized device coords (-1..1)
 let selected = null; // piece being dragged
 let hovered = null;  // piece under the cursor (when not dragging)
+let dragFrom = null; // square the dragged piece started on
+let dragTo = null;   // square it will be dropped on (dragFrom means "put it back")
+let legalTargets = new Set(); // squares canMove allowed for this drag
+
+// Translucent squares marking where the dragged piece may go, one per square, built once.
+const targetGeometry = new THREE.PlaneGeometry(CELL_SIZE * 0.9, CELL_SIZE * 0.9);
+const targetMaterial = new THREE.MeshBasicMaterial({ color: 0xFFEA00, transparent: true, opacity: 0.35, depthWrite: false });
+const targetMarkers = {};
+for (let row = 0; row < GRID_DIVISIONS; row++) {
+    for (let col = 0; col < GRID_DIVISIONS; col++) {
+        const marker = new THREE.Mesh(targetGeometry, targetMaterial);
+        marker.rotation.x = -0.5 * Math.PI;            // lie flat like the board
+        marker.position.set(cellCenter(col), 0.02, cellCenter(row)); // above the grid lines
+        marker.visible = false;
+        scene.add(marker);
+        targetMarkers[cellToSquare(col, row)] = marker;
+    }
+}
+
+// Ask canMove about every square and mark the legal ones (or clear all marks with from = null).
+function showTargets(from) {
+    legalTargets = new Set();
+    for (const square in targetMarkers) {
+        const legal = from !== null && square !== from && canMove(from, square);
+        if (legal) legalTargets.add(square);
+        targetMarkers[square].visible = legal;
+    }
+}
 
 // Hover: lighten the piece under the cursor and show a grab cursor.
 function setHovered(piece) {
@@ -276,12 +334,14 @@ renderer.domElement.addEventListener('pointerdown', function(e) {
     if (!hit) return; // missed: let OrbitControls pan as usual
     hovered = null;
     selected = hit.object;
+    dragFrom = dragTo = selected.userData.square;
+    showTargets(dragFrom);
     selected.material.color.set(0xFFEA00);
     renderer.domElement.style.cursor = 'grabbing';
     orbit.enabled = false;
 }, { capture: true });
 
-// Move: hover highlight when idle; while dragging, snap the piece to the cell under the cursor.
+// Move: hover highlight when idle; while dragging, snap the piece to the square under the cursor if it's legal.
 // On window (not the canvas) so a drag keeps working if the mouse leaves the canvas.
 window.addEventListener('pointermove', function(e) {
     aimRay(e);
@@ -294,18 +354,39 @@ window.addEventListener('pointermove', function(e) {
     const [hit] = rayCaster.intersectObject(plane, false);
     if (!hit) return; // cursor is off the board: leave the piece where it is
     const square = cellToSquare(toCell(hit.point.x), toCell(hit.point.z));
-    // Don't stack pieces: only move into an empty square (or stay on its own).
-    const occupant = pieceAt(square);
-    if (!occupant || occupant === selected) placeOnSquare(selected, square);
+    if (square !== dragFrom && !legalTargets.has(square)) return; // illegal: stay on the last legal square
+    dragTo = square;
+    showOnSquare(selected, square); // visual only; the grid changes only if onMove moves it
 });
 
-// Drop: restore the piece's color and give the camera back to OrbitControls.
+// Drop: put the piece back on its grid square, then report the move and let the caller apply it.
 window.addEventListener('pointerup', function() {
     if (!selected) return;
+    const from = dragFrom;
+    const to = dragTo;
     selected.material.color.set(selected.userData.color);
-    selected = null;
+    showOnSquare(selected, selected.userData.square);
+    showTargets(null);
+    selected = dragFrom = dragTo = null;
     renderer.domElement.style.cursor = '';
     orbit.enabled = true;
+    if (to !== from) onMove(from, to);
+});
+
+// ---------------------------------------------------------------------------
+// Workbench rules stub (a real game passes chess.js-backed handlers instead)
+// ---------------------------------------------------------------------------
+
+// Queen-style lines with no blocking; dropping on any piece captures it.
+setMoveHandlers({
+    canMove(from, to) {
+        const a = squareToCell(from);
+        const b = squareToCell(to);
+        const dc = Math.abs(a.col - b.col);
+        const dr = Math.abs(a.row - b.row);
+        return dc === 0 || dr === 0 || dc === dr;
+    },
+    onMove: movePiece,
 });
 
 // ---------------------------------------------------------------------------
