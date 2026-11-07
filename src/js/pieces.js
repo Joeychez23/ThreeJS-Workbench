@@ -133,7 +133,37 @@ export function createPiece(type, color, size = 1) {
     if (color === 'b') mesh.rotation.y = Math.PI; // Black's knights face the other way
     mesh.userData.type = type;
     mesh.userData.wood = wood;
+    mesh.add(blobShadow(type));
     return mesh;
+}
+
+// Fake shadow: a soft dark disc under the piece (no shadow maps, so lighting cost doesn't grow with pieces).
+// Geometry and texture are shared; each shadow has its own material only so it can fade on its own.
+const SHADOW_Y = 0.015;     // world units above the board: over the grid lines (0.01), under the target marks (0.02)
+const SHADOW_OPACITY = 0.85;
+const SHADOW_FADE = 1.5;    // piece units of lift at which the shadow is gone
+const shadowGeometry = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+
+function blobShadow(type) {
+    const geometry = pieceGeometry(type);
+    if (!geometry.boundingBox) geometry.computeBoundingBox();
+    const { min, max } = geometry.boundingBox;
+    const width = 1.5 * Math.max(max.x - min.x, max.z - min.z); // a little wider than the foot
+    const shadow = new THREE.Mesh(shadowGeometry, new THREE.MeshBasicMaterial({
+        map: materials.blob, transparent: true, opacity: SHADOW_OPACITY, depthWrite: false,
+    }));
+    shadow.scale.set(width, 1, width);
+    shadow.renderOrder = -1; // under the pieces and target marks, no z-fighting with the board
+    shadow.name = 'shadow';
+    return shadow;
+}
+
+// Keep a piece's shadow on the board while the piece is lifted, fading it with height. Call each frame.
+export function updateShadow(mesh) {
+    const shadow = mesh.getObjectByName('shadow');
+    const lift = mesh.position.y / mesh.scale.y; // in piece units
+    shadow.position.y = SHADOW_Y / mesh.scale.y - lift;
+    shadow.material.opacity = SHADOW_OPACITY * THREE.MathUtils.clamp(1 - lift / SHADOW_FADE, 0, 1);
 }
 
 // state: 'hover', 'selected' or null (normal).

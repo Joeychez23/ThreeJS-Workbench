@@ -1,6 +1,6 @@
 // Self-check for pieces.js: run `node src/js/pieces.check.mjs`.
 import assert from 'node:assert/strict';
-import { pieceGeometry, createPiece, setPieceState } from './pieces.js';
+import { pieceGeometry, createPiece, setPieceState, updateShadow } from './pieces.js';
 import * as materials from './materials.js';
 
 const counts = { p: 16, n: 4, b: 4, r: 4, q: 2, k: 2 };
@@ -33,4 +33,13 @@ assert.equal(w.material[0], materials.hovered.maple);
 assert.equal(b.material[0], materials.walnut, 'hover on one piece leaves others alone');
 setPieceState(w, null);
 assert.equal(w.material[0], materials.maple);
+// Blob shadow stays on the board and fades as the piece lifts.
+const lifted = createPiece('p', 'w', 2.4);
+const shadow = lifted.getObjectByName('shadow');
+updateShadow(lifted);
+const full = shadow.material.opacity;
+assert.ok(full > 0 && Math.abs(lifted.localToWorld(shadow.position.clone()).y - 0.015) < 1e-6);
+lifted.position.y = 1.2; lifted.updateMatrixWorld(); updateShadow(lifted);
+assert.ok(Math.abs(shadow.getWorldPosition(shadow.position.clone()).y - 0.015) < 1e-6, 'shadow stays on the board');
+assert.ok(shadow.material.opacity < full, 'shadow fades when lifted');
 console.log('32 pieces:', total, 'triangles - ok');

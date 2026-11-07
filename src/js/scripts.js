@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { createPiece, setPieceState } from './pieces.js';
+import { createPiece, setPieceState, updateShadow } from './pieces.js';
 
-// Debug tools (dat.gui panel, spotlight helper) load only with ?debug in the URL.
+// Debug tools (dat.gui panel, key light helper) load only with ?debug in the URL.
 const DEBUG = new URLSearchParams(window.location.search).has('debug');
 
 // Image URLs, resolved by Parcel at build time.
@@ -229,42 +229,36 @@ scene.add(gridHelper);
 // Lights
 // ---------------------------------------------------------------------------
 
-// Dim fill light so unlit sides aren't pitch black.
-const ambientLight = new THREE.AmbientLight(0x333333);
-scene.add(ambientLight);
+// Two lights, no shadow maps, so the cost stays flat however many pieces there are (blob shadows are in pieces.js).
+// Fill: warm sky above, dark wood bounce below, so unlit sides keep some color.
+const fillLight = new THREE.HemisphereLight(0xFFF4E0, 0x3A2A1A, 1.2);
+scene.add(fillLight);
 
-// Basic key light so the pieces' shapes read; #411 replaces this lighting setup.
-const keyLight = new THREE.DirectionalLight(0xFFFFFF, 2.5);
+// Key light: high and to White's left, so pieces get a lit side and a shaded side from the default camera.
+const keyLight = new THREE.DirectionalLight(0xFFFFFF, 2.2);
 keyLight.position.set(-10, 25, 15);
 scene.add(keyLight);
-
-// Main light (Phase 2 replaces it with a directional key light).
-const spotlight = new THREE.SpotLight(0xFFFFFF);
-scene.add(spotlight);
-spotlight.position.set(-100, 100, 0);
-spotlight.angle = 0.2;
-spotlight.penumbra = 0;
-spotlight.intensity = 1;
 
 // White fog that thickens with distance.
 scene.fog = new THREE.FogExp2(0xFFFFFF, 0.01);
 
 // ---------------------------------------------------------------------------
-// Debug tools (?debug): spotlight helper and a GUI panel (top right) for the spotlight
+// Debug tools (?debug): key light helper and a GUI panel (top right) for the lights
 // ---------------------------------------------------------------------------
 
-let sLightHelper = null;
+let keyLightHelper = null;
 
 if (DEBUG) {
-    sLightHelper = new THREE.SpotLightHelper(spotlight);
-    scene.add(sLightHelper);
+    keyLightHelper = new THREE.DirectionalLightHelper(keyLight, 3);
+    scene.add(keyLightHelper);
 
     // Loaded on demand so dat.gui stays out of the normal bundle.
     import('dat.gui').then(function(dat) {
         const gui = new dat.GUI();
-        gui.add(spotlight, 'angle', 0, 1);
-        gui.add(spotlight, 'penumbra', 0, 1);
-        gui.add(spotlight, 'intensity', 0, 100000);
+        gui.add(keyLight, 'intensity', 0, 5).name('key');
+        gui.add(keyLight.position, 'x', -40, 40).name('key x');
+        gui.add(keyLight.position, 'z', -40, 40).name('key z');
+        gui.add(fillLight, 'intensity', 0, 3).name('fill');
     });
 }
 
@@ -488,7 +482,8 @@ setMoveHandlers({
 // ---------------------------------------------------------------------------
 
 function animate() {
-    if (sLightHelper) sLightHelper.update(); // follow GUI changes to the spotlight
+    if (keyLightHelper) keyLightHelper.update(); // follow GUI changes to the key light
+    for (const piece of pieces) updateShadow(piece); // shadows stay on the board as pieces lift
     renderer.render(scene, camera);
 }
 

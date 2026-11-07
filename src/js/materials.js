@@ -48,6 +48,24 @@ const HIGHLIGHT_RIM = 0x55C8FF; // cool blue: unlike both woods, the board and t
 
 export const maple = wood(MAPLE, 0x000000);   // White's pieces: light enough on both squares, no rim needed
 export const walnut = wood(WALNUT, 0x5A4430); // Black's pieces: a warm rim keeps them readable on dark squares
+// Blob shadow: black with a soft radial alpha falloff, one texture shared by every piece's shadow.
+function blobTexture(size = 64) {
+    const data = new Uint8Array(size * size * 4);
+    for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+            const d = Math.hypot(x + 0.5 - size / 2, y + 0.5 - size / 2) / (size / 2); // 0 center .. 1 edge
+            const a = Math.max(0, 1 - d) ** 1.5;
+            data.set([0, 0, 0, 255 * a], (y * size + x) * 4);
+        }
+    }
+    const texture = new THREE.DataTexture(data, size, size);
+    texture.magFilter = THREE.LinearFilter;
+    texture.needsUpdate = true;
+    return texture;
+}
+
+export const blob = blobTexture();
+
 export const gold = new THREE.MeshStandardMaterial({ color: 0xD4A63A, metalness: 0.8, roughness: 0.3 }); // crowns, collars, frame inlay (#412)
 
 // Highlights add a strong blue rim instead of lightening, so they show on maple as well as walnut.
