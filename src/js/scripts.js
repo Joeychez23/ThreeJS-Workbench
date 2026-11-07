@@ -116,27 +116,68 @@ orbit.update();
 
 // Movable pieces, each one cell-sized and snapped to a cell center.
 const boxGeometry = new THREE.BoxGeometry(PIECE_SIZE, PIECE_SIZE, PIECE_SIZE); // shared by all pieces
-const pieces = []; // everything the mouse can hover and grab
+const pieces = []; // every piece mesh, used only for raycasting; lookups go through the grid
 
-// Center a piece on cell (col, row), resting on top of the board.
-function placeOnCell(piece, col, row) {
-    piece.position.set(cellCenter(col), PIECE_SIZE / 2, cellCenter(row));
+// The board's source of truth: grid[row][col] holds the mesh on that square, or null.
+// Same layout as chess.js's board(): row 0 is rank 8, row 7 is rank 1, col 0 is file a.
+// World +Z faces the starting camera, so a1 sits bottom-left from White's side.
+const FILES = 'abcdefgh';
+const grid = Array.from({ length: GRID_DIVISIONS }, () => Array(GRID_DIVISIONS).fill(null));
+
+// "e4" -> { col: 4, row: 4 }. Throws on anything that isn't a1..h8.
+function squareToCell(square) {
+    const col = FILES.indexOf(square[0]);
+    const rank = Number(square[1]);
+    if (square.length !== 2 || col < 0 || !(rank >= 1 && rank <= 8)) throw new Error(`Bad square: ${square}`);
+    return { col, row: GRID_DIVISIONS - rank };
+}
+
+// (col, row) -> "e4".
+function cellToSquare(col, row) {
+    return FILES[col] + (GRID_DIVISIONS - row);
+}
+
+// The mesh on a square, or null. O(1).
+function pieceAt(square) {
+    const { col, row } = squareToCell(square);
+    return grid[row][col];
+}
+
+// Take whatever is on a square off the grid and return it (the mesh stays in the scene).
+function removeFrom(square) {
+    const { col, row } = squareToCell(square);
+    const mesh = grid[row][col];
+    grid[row][col] = null;
+    if (mesh) mesh.userData.square = null;
+    return mesh;
+}
+
+// Move a mesh to a square: the only place grid entries and mesh positions change, so they can't disagree.
+// Throws if another piece is already there.
+function placeOnSquare(mesh, square) {
+    const { col, row } = squareToCell(square);
+    const occupant = grid[row][col];
+    if (occupant && occupant !== mesh) throw new Error(`${square} is occupied`);
+    if (mesh.userData.square) removeFrom(mesh.userData.square);
+    grid[row][col] = mesh;
+    mesh.userData.square = square;
+    mesh.position.set(cellCenter(col), PIECE_SIZE / 2, cellCenter(row)); // centered, resting on the board
 }
 
 // Create a piece; its base color is kept in userData so hover/select tints can be undone.
-function addPiece(color, col, row) {
+function addPiece(color, square) {
     const piece = new THREE.Mesh(boxGeometry, new THREE.MeshBasicMaterial({ color }));
     piece.userData.color = color;
-    placeOnCell(piece, col, row);
+    placeOnSquare(piece, square);
     scene.add(piece);
     pieces.push(piece);
 }
 
-addPiece(0x00FF00, 3, 3);
-addPiece(0xFF0000, 0, 7);
-addPiece(0x0000FF, 7, 0);
-addPiece(0xFF00FF, 2, 5);
-addPiece(0x00FFFF, 5, 2);
+addPiece(0x00FF00, 'd5');
+addPiece(0xFF0000, 'a1');
+addPiece(0x0000FF, 'h8');
+addPiece(0xFF00FF, 'c3');
+addPiece(0x00FFFF, 'f6');
 
 // ---------------------------------------------------------------------------
 // Board
@@ -252,11 +293,10 @@ window.addEventListener('pointermove', function(e) {
     }
     const [hit] = rayCaster.intersectObject(plane, false);
     if (!hit) return; // cursor is off the board: leave the piece where it is
-    const col = toCell(hit.point.x);
-    const row = toCell(hit.point.z);
-    // Don't stack pieces: only move into an empty cell.
-    const occupied = pieces.some(p => p !== selected && toCell(p.position.x) === col && toCell(p.position.z) === row);
-    if (!occupied) placeOnCell(selected, col, row);
+    const square = cellToSquare(toCell(hit.point.x), toCell(hit.point.z));
+    // Don't stack pieces: only move into an empty square (or stay on its own).
+    const occupant = pieceAt(square);
+    if (!occupant || occupant === selected) placeOnSquare(selected, square);
 });
 
 // Drop: restore the piece's color and give the camera back to OrbitControls.
