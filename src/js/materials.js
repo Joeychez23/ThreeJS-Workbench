@@ -26,14 +26,30 @@ function grainTexture(size = 128) {
 
 const grain = grainTexture();
 
-const wood = (color) => new THREE.MeshStandardMaterial({ color, map: grain, roughness: 0.55, metalness: 0 });
+// Fresnel rim glow: adds `rim` color where the surface turns away from the camera, so a piece's outline
+// reads on any square from any angle. The color is a uniform, so every rimmed material shares one shader.
+function withRim(material, rim) {
+    material.userData.rim = { value: new THREE.Color(rim) };
+    material.onBeforeCompile = (shader) => {
+        shader.uniforms.rimColor = material.userData.rim;
+        shader.fragmentShader = shader.fragmentShader
+            .replace('void main() {', 'uniform vec3 rimColor;\nvoid main() {')
+            .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+                totalEmissiveRadiance += rimColor * pow(1.0 - saturate(dot(normal, normalize(vViewPosition))), 3.0);`);
+    };
+    return material;
+}
 
-export const maple = wood(0xE6CFA0);   // White's pieces
-export const walnut = wood(0x3A2416);  // Black's pieces
+const wood = (color, rim) => withRim(new THREE.MeshStandardMaterial({ color, map: grain, roughness: 0.55, metalness: 0 }), rim);
+
+const MAPLE = 0xF3E7CF;
+const WALNUT = 0x3A2416;
+const HIGHLIGHT_RIM = 0x55C8FF; // cool blue: unlike both woods, the board and the yellow target squares
+
+export const maple = wood(MAPLE, 0x000000);   // White's pieces: light enough on both squares, no rim needed
+export const walnut = wood(WALNUT, 0x5A4430); // Black's pieces: a warm rim keeps them readable on dark squares
 export const gold = new THREE.MeshStandardMaterial({ color: 0xD4A63A, metalness: 0.8, roughness: 0.3 }); // crowns, collars, frame inlay (#412)
 
-// Highlight variants of the woods (shared too); #410 refines how highlights read on both colors.
-export const hovered = { maple: wood(0xE6CFA0), walnut: wood(0x3A2416) };
-hovered.maple.emissive.set(0x403020);
-hovered.walnut.emissive.set(0x403020);
-export const selected = wood(0xFFEA00);
+// Highlights add a strong blue rim instead of lightening, so they show on maple as well as walnut.
+export const hovered = { maple: wood(MAPLE, HIGHLIGHT_RIM), walnut: wood(WALNUT, HIGHLIGHT_RIM) };
+export const selected = wood(0xFFEA00, HIGHLIGHT_RIM); // yellow like the target squares
