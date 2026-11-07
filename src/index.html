@@ -9,9 +9,22 @@
         body {
             margin: 0
         }
+        /* The 3D view fills its container; the renderer follows the container's size. */
+        #board3d {
+            width: 100vw;
+            height: 100vh;
+            height: 100dvh; /* tracks mobile browser bars where supported */
+            overflow: hidden;
+        }
+        #board3d canvas {
+            display: block; /* no inline-baseline gap under the canvas */
+            width: 100%;
+            height: 100%;
+        }
     </style>
 </head>
 <body>
+    <div id="board3d"></div>
     <script src="./js/scripts.js" type="module"></script>
 </body>
 </html>
