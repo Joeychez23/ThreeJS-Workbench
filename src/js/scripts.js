@@ -1,11 +1,13 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { createPiece, setPieceState, updateShadow } from './pieces.js';
+import { createSurroundings } from './board.js';
+import { BAIZE_FOG } from './materials.js';
 
-// Debug tools (dat.gui panel, spotlight helper) load only with ?debug in the URL.
+// Debug tools (dat.gui panel, key light helper) load only with ?debug in the URL.
 const DEBUG = new URLSearchParams(window.location.search).has('debug');
 
 // Image URLs, resolved by Parcel at build time.
-const stars = new URL('../img/stars.jpg', import.meta.url).href;
 // 1024x1024 crop of chess-board.png holding exactly the 8x8 squares (frame removed), so cell i spans 128px.
 const board = new URL('../img/chess-board.jpg', import.meta.url).href;
 
@@ -17,7 +19,7 @@ const board = new URL('../img/chess-board.jpg', import.meta.url).href;
 const BOARD_SIZE = 24;                          // world units per board side
 const GRID_DIVISIONS = 8;                       // cells per side
 const CELL_SIZE = BOARD_SIZE / GRID_DIVISIONS;  // world units per cell
-const PIECE_SIZE = CELL_SIZE * 0.8;             // pieces leave a small gap inside their cell
+const PIECE_SIZE = CELL_SIZE * 0.8;             // one piece unit (pieces.js); bases leave a gap inside the cell
 
 // Grid index (0..7) -> world coordinate of that cell's center.
 const cellCenter = (i) => -BOARD_SIZE / 2 + CELL_SIZE * (i + 0.5);
@@ -73,11 +75,10 @@ new ResizeObserver(queueResize).observe(container);
 if (screen.orientation) screen.orientation.addEventListener('change', queueResize);
 else window.addEventListener('orientationchange', queueResize);
 
-// Starfield background.
+// The baize table (board.js) fills the view; past it, fog fades into the same dark green as the background.
 const textureLoader = new THREE.TextureLoader();
-const background = textureLoader.load(stars);
-background.colorSpace = THREE.SRGBColorSpace;
-scene.background = background;
+scene.background = new THREE.Color(BAIZE_FOG);
+scene.fog = new THREE.Fog(BAIZE_FOG, 50, 150);
 
 // ---------------------------------------------------------------------------
 // Camera controls
@@ -114,8 +115,7 @@ orbit.update();
 // Pieces
 // ---------------------------------------------------------------------------
 
-// Movable pieces, each one cell-sized and snapped to a cell center.
-const boxGeometry = new THREE.BoxGeometry(PIECE_SIZE, PIECE_SIZE, PIECE_SIZE); // shared by all pieces
+// Movable pieces from createPiece(), each snapped to a cell center.
 const pieces = []; // every piece mesh, used only for raycasting; lookups go through the grid
 
 // The board's source of truth: grid[row][col] holds the mesh on that square, or null.
@@ -167,7 +167,7 @@ function placeOnSquare(mesh, square) {
 // Draw a mesh centered on a square, resting on the board, without touching the grid (used mid-drag).
 function showOnSquare(mesh, square) {
     const { col, row } = squareToCell(square);
-    mesh.position.set(cellCenter(col), PIECE_SIZE / 2, cellCenter(row));
+    mesh.position.set(cellCenter(col), 0, cellCenter(row)); // piece origins sit at their base
 }
 
 // Move the piece on `from` to `to`, taking whatever was on `to` out of the scene (a capture).
@@ -184,20 +184,23 @@ export function movePiece(from, to) {
     placeOnSquare(mesh, to);
 }
 
-// Create a piece; its base color is kept in userData so hover/select tints can be undone.
-function addPiece(color, square) {
-    const piece = new THREE.Mesh(boxGeometry, new THREE.MeshBasicMaterial({ color }));
-    piece.userData.color = color;
+// Create a piece (type and color as chess.js letters).
+function addPiece(type, color, square) {
+    const piece = createPiece(type, color, PIECE_SIZE);
     placeOnSquare(piece, square);
     scene.add(piece);
     pieces.push(piece);
 }
 
-addPiece(0x00FF00, 'd5');
-addPiece(0xFF0000, 'a1');
-addPiece(0x0000FF, 'h8');
-addPiece(0xFF00FF, 'c3');
-addPiece(0x00FFFF, 'f6');
+// Starting position.
+for (let col = 0; col < GRID_DIVISIONS; col++) {
+    const file = FILES[col];
+    const back = 'rnbqkbnr'[col];
+    addPiece(back, 'w', file + 1);
+    addPiece('p', 'w', file + 2);
+    addPiece('p', 'b', file + 7);
+    addPiece(back, 'b', file + 8);
+}
 
 // ---------------------------------------------------------------------------
 // Board
@@ -217,6 +220,13 @@ boardProperties.anisotropy = Math.min(renderer.capabilities.getMaxAnisotropy(), 
 plane.material.map = boardProperties;
 plane.rotation.x = -0.5 * Math.PI; // lay the plane flat (it's created standing up in XY)
 
+// Walnut frame with gold inlay and a-h / 1-8 labels, on a baize table.
+const surroundings = createSurroundings(BOARD_SIZE);
+scene.add(surroundings.group);
+
+// Move the labels to the viewing side, like the 2D board's flip (called by the board-flip work in Phases 3/4).
+export const setBoardFlipped = surroundings.setFlipped;
+
 // Visible grid lines matching the 8x8 cells.
 const gridHelper = new THREE.GridHelper(BOARD_SIZE, GRID_DIVISIONS);
 gridHelper.position.y = 0.01; // just above the board to avoid z-fighting
@@ -226,37 +236,33 @@ scene.add(gridHelper);
 // Lights
 // ---------------------------------------------------------------------------
 
-// Dim fill light so unlit sides aren't pitch black.
-const ambientLight = new THREE.AmbientLight(0x333333);
-scene.add(ambientLight);
+// Two lights, no shadow maps, so the cost stays flat however many pieces there are (blob shadows are in pieces.js).
+// Fill: warm sky above, dark wood bounce below, so unlit sides keep some color.
+const fillLight = new THREE.HemisphereLight(0xFFF4E0, 0x3A2A1A, 1.2);
+scene.add(fillLight);
 
-// Main light (Phase 2 replaces it with a directional key light).
-const spotlight = new THREE.SpotLight(0xFFFFFF);
-scene.add(spotlight);
-spotlight.position.set(-100, 100, 0);
-spotlight.angle = 0.2;
-spotlight.penumbra = 0;
-spotlight.intensity = 1;
-
-// White fog that thickens with distance.
-scene.fog = new THREE.FogExp2(0xFFFFFF, 0.01);
+// Key light: high and to White's left, so pieces get a lit side and a shaded side from the default camera.
+const keyLight = new THREE.DirectionalLight(0xFFFFFF, 2.2);
+keyLight.position.set(-10, 25, 15);
+scene.add(keyLight);
 
 // ---------------------------------------------------------------------------
-// Debug tools (?debug): spotlight helper and a GUI panel (top right) for the spotlight
+// Debug tools (?debug): key light helper and a GUI panel (top right) for the lights
 // ---------------------------------------------------------------------------
 
-let sLightHelper = null;
+let keyLightHelper = null;
 
 if (DEBUG) {
-    sLightHelper = new THREE.SpotLightHelper(spotlight);
-    scene.add(sLightHelper);
+    keyLightHelper = new THREE.DirectionalLightHelper(keyLight, 3);
+    scene.add(keyLightHelper);
 
     // Loaded on demand so dat.gui stays out of the normal bundle.
     import('dat.gui').then(function(dat) {
         const gui = new dat.GUI();
-        gui.add(spotlight, 'angle', 0, 1);
-        gui.add(spotlight, 'penumbra', 0, 1);
-        gui.add(spotlight, 'intensity', 0, 100000);
+        gui.add(keyLight, 'intensity', 0, 5).name('key');
+        gui.add(keyLight.position, 'x', -40, 40).name('key x');
+        gui.add(keyLight.position, 'z', -40, 40).name('key z');
+        gui.add(fillLight, 'intensity', 0, 3).name('fill');
     });
 }
 
@@ -308,12 +314,12 @@ function showTargets(from) {
     }
 }
 
-// Hover: lighten the piece under the cursor and show a grab cursor.
+// Hover: brighten the piece under the cursor and show a grab cursor.
 function setHovered(piece) {
     if (hovered === piece) return;
-    if (hovered) hovered.material.color.set(hovered.userData.color);
+    if (hovered) setPieceState(hovered, null);
     hovered = piece;
-    if (hovered) hovered.material.color.set(hovered.userData.color).offsetHSL(0, 0, 0.25);
+    if (hovered) setPieceState(hovered, 'hover');
     renderer.domElement.style.cursor = hovered ? 'grab' : '';
 }
 
@@ -338,7 +344,7 @@ renderer.domElement.addEventListener('pointerdown', function(e) {
     selected = hit.object;
     dragFrom = dragTo = selected.userData.square;
     showTargets(dragFrom);
-    selected.material.color.set(0xFFEA00);
+    setPieceState(selected, 'selected');
     renderer.domElement.style.cursor = 'grabbing';
     orbit.enabled = false;
 }, { capture: true });
@@ -368,7 +374,7 @@ window.addEventListener('pointerup', function(e) {
     if (!selected) return;
     const from = dragFrom;
     const to = dragTo;
-    selected.material.color.set(selected.userData.color);
+    setPieceState(selected, null);
     showOnSquare(selected, selected.userData.square);
     showTargets(null);
     selected = dragFrom = dragTo = null;
@@ -449,12 +455,12 @@ function selectByTap(piece) {
     showTargets(piece.userData.square);
     if (legalTargets.size === 0) return;
     tapSelected = piece;
-    piece.material.color.set(0xFFEA00);
+    setPieceState(piece, 'selected');
 }
 
 function deselectTap() {
     if (!tapSelected) return;
-    tapSelected.material.color.set(tapSelected.userData.color);
+    setPieceState(tapSelected, null);
     tapSelected = null;
     showTargets(null);
 }
@@ -480,7 +486,8 @@ setMoveHandlers({
 // ---------------------------------------------------------------------------
 
 function animate() {
-    if (sLightHelper) sLightHelper.update(); // follow GUI changes to the spotlight
+    if (keyLightHelper) keyLightHelper.update(); // follow GUI changes to the key light
+    for (const piece of pieces) updateShadow(piece); // shadows stay on the board as pieces lift
     renderer.render(scene, camera);
 }
 
