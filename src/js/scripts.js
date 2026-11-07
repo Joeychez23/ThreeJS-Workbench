@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import * as dat from 'dat.gui';
+
+// Debug tools (dat.gui panel, spotlight helper) load only with ?debug in the URL.
+const DEBUG = new URLSearchParams(window.location.search).has('debug');
 
 // Image URLs, resolved by Parcel at build time.
-const nebula = new URL('../img/nebula.jpg', import.meta.url).href;
 const stars = new URL('../img/stars.jpg', import.meta.url).href;
 const board = new URL('../img/chess-board.png', import.meta.url).href;
 
@@ -27,8 +28,6 @@ const toCell = (v) => THREE.MathUtils.clamp(Math.floor((v + BOARD_SIZE / 2) / CE
 // ---------------------------------------------------------------------------
 
 const renderer = new THREE.WebGLRenderer();
-
-renderer.shadowMap.enabled = true;
 
 renderer.setSize(window.innerWidth, window.innerHeight);
 
@@ -76,9 +75,6 @@ renderer.domElement.addEventListener('wheel', function(e) {
 const axesHelper = new THREE.AxesHelper(3);
 scene.add(axesHelper);
 
-camera.position.z = 5;
-camera.position.y = 2;
-
 // Starting camera position (looking down at the board at an angle).
 camera.position.set(-10, 30, 30);
 orbit.update();
@@ -116,51 +112,21 @@ addPiece(0x00FFFF, 5, 2);
 // ---------------------------------------------------------------------------
 
 const planeGeometry = new THREE.PlaneGeometry(BOARD_SIZE, BOARD_SIZE);
-const planeMaterial = new THREE.MeshStandardMaterial(
-    {
-        color: 0xFFFFFF,
-
-        // side: THREE.DoubleSide
-    }
-);
-
-
-// const board = textureLoader.load(nebula);
-// board.colorSpace = THREE.SRGBColorSpace;
-
-
+const planeMaterial = new THREE.MeshStandardMaterial({ color: 0xFFFFFF });
 const plane = new THREE.Mesh(planeGeometry, planeMaterial);
-// plane.position.set(-60, 10, 0)
 scene.add(plane);
 const boardProperties = textureLoader.load(board);
 boardProperties.colorSpace = THREE.SRGBColorSpace;
 // Crop the texture to the 8x8 squares (drop the wooden frame) so the grid lines up with them.
 boardProperties.offset.set(0.095, 0.0905);
 boardProperties.repeat.set(0.8235, 0.8195);
-plane.material.map = boardProperties
+plane.material.map = boardProperties;
 plane.rotation.x = -0.5 * Math.PI; // lay the plane flat (it's created standing up in XY)
-plane.receiveShadow = true;
 
 // Visible grid lines matching the 8x8 cells.
 const gridHelper = new THREE.GridHelper(BOARD_SIZE, GRID_DIVISIONS);
 gridHelper.position.y = 0.01; // just above the board to avoid z-fighting
 scene.add(gridHelper);
-
-// ---------------------------------------------------------------------------
-// Sphere (not added to the scene)
-// ---------------------------------------------------------------------------
-
-const sphereGeometry = new THREE.SphereGeometry(3, 25, 25);
-const spherexMaterial = new THREE.MeshStandardMaterial(
-    {
-        color: 0x0000FF,
-        wireframe: false
-    }
-);
-const sphere = new THREE.Mesh(sphereGeometry, spherexMaterial);
-// scene.add(sphere);
-sphere.position.set(-10, 10, 0);
-sphere.castShadow = true;
 
 // ---------------------------------------------------------------------------
 // Lights
@@ -170,74 +136,35 @@ sphere.castShadow = true;
 const ambientLight = new THREE.AmbientLight(0x333333);
 scene.add(ambientLight);
 
-// const directionalLight = new THREE.DirectionalLight(0xFFFFFF, 0.8);
-// scene.add(directionalLight);
-// directionalLight.position.set(-30, 50, 0);
-// directionalLight.castShadow = true;
-// console.log(plane, directionalLight)
-
-// // Static
-// //-(boardWidth / 2) × y / √(x² + y²)
-// //Dynamic
-// // ((P.x - w/2) × L.y + P.y × |L.x|) / √(L.x² + L.y²)
-// //Dynamic
-// // directionalLight.shadow.camera.bottom = (((plane.position.x - (planeGeometry.parameters.width/2)) * directionalLight.position.y + plane.position.y * Math.abs(directionalLight.position.x))  / Math.sqrt(directionalLight.position.x**2 + directionalLight.position.y**2));
-// // directionalLight.shadow.camera.top = ((plane.position.x + planeGeometry.parameters.width / 2) * directionalLight.position.y + plane.position.y * Math.abs(directionalLight.position.x)) / Math.hypot(directionalLight.position.x, directionalLight.position.y) ;
-// //Staic
-// // directionalLight.shadow.camera.top = (planeGeometry.parameters.width/2) * (directionalLight.position.y / Math.sqrt(directionalLight.position.x**2 + directionalLight.position.y**2))
-// directionalLight.shadow.camera.bottom = -12;
-
-// const dLightHelper = new THREE.DirectionalLightHelper(directionalLight);
-// scene.add(dLightHelper);
-
-// const dLightShadowHelper = new THREE.CameraHelper(directionalLight.shadow.camera);
-// scene.add(dLightShadowHelper);
-
-// Main light; angle, penumbra and intensity are driven by the GUI each frame.
+// Main light (Phase 2 replaces it with a directional key light).
 const spotlight = new THREE.SpotLight(0xFFFFFF);
 scene.add(spotlight);
 spotlight.position.set(-100, 100, 0);
-spotlight.castShadow = true;
 spotlight.angle = 0.2;
-
-const sLightHelper = new THREE.SpotLightHelper(spotlight);
-scene.add(sLightHelper);
+spotlight.penumbra = 0;
+spotlight.intensity = 1;
 
 // White fog that thickens with distance.
-// scene.fog = new THREE.Fog(0xFFFFFF, 0, 200);
 scene.fog = new THREE.FogExp2(0xFFFFFF, 0.01);
 
 // ---------------------------------------------------------------------------
-// GUI controls (top-right panel)
+// Debug tools (?debug): spotlight helper and a GUI panel (top right) for the spotlight
 // ---------------------------------------------------------------------------
 
-const gui = new dat.GUI();
+let sLightHelper = null;
 
-const options = {
-    sphereColor: '#ffea00',
-    wireframe: false,
-    speed: 0.01,
-    angle: 0.2,
-    penumbra: 0,
-    intensity: 1,
+if (DEBUG) {
+    sLightHelper = new THREE.SpotLightHelper(spotlight);
+    scene.add(sLightHelper);
+
+    // Loaded on demand so dat.gui stays out of the normal bundle.
+    import('dat.gui').then(function(dat) {
+        const gui = new dat.GUI();
+        gui.add(spotlight, 'angle', 0, 1);
+        gui.add(spotlight, 'penumbra', 0, 1);
+        gui.add(spotlight, 'intensity', 0, 100000);
+    });
 }
-
-gui.addColor(options, 'sphereColor').onChange(function(e) {
-    sphere.material.color.set(e);
-})
-
-gui.add(options, 'wireframe').onChange(function(e) {
-    sphere.material.wireframe = e;
-});
-
-gui.add(options, 'speed', 0, 0.1);
-
-gui.add(options, 'angle', 0, 1);
-gui.add(options, 'penumbra', 0, 1);
-gui.add(options, 'intensity', 0, 100000);
-
-let step = 0; // sphere bounce phase
-// let speed = 0.01;
 
 // ---------------------------------------------------------------------------
 // Mouse interaction: hover, grab and drag pieces
@@ -312,17 +239,8 @@ window.addEventListener('pointerup', function() {
 // Render loop
 // ---------------------------------------------------------------------------
 
-function animate(time) {
-    // Bounce the sphere.
-    step+=options.speed;
-    // sphere.position.y = 10 * Math.abs(Math.sin(step));
-
-    // Apply GUI values to the spotlight.
-    spotlight.angle = options.angle;
-    spotlight.penumbra = options.penumbra;
-    spotlight.intensity = options.intensity;
-    sLightHelper.update();
-
+function animate() {
+    if (sLightHelper) sLightHelper.update(); // follow GUI changes to the spotlight
     renderer.render(scene, camera);
 }
 
