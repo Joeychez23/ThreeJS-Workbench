@@ -27,20 +27,50 @@ const toCell = (v) => THREE.MathUtils.clamp(Math.floor((v + BOARD_SIZE / 2) / CE
 // Renderer, scene, camera
 // ---------------------------------------------------------------------------
 
+// The element the 3D view fills (sized by CSS, so it also works inside another page's layout).
+const container = document.getElementById('board3d');
+
 const renderer = new THREE.WebGLRenderer();
-
-renderer.setSize(window.innerWidth, window.innerHeight);
-
-document.body.appendChild(renderer.domElement);
+container.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 
 const camera = new THREE.PerspectiveCamera(
-    75,                                     // vertical field of view (degrees)
-    window.innerWidth / innerHeight,        // aspect ratio
-    0.1,                                    // near clipping plane
-    1000                                    // far clipping plane
+    75,     // vertical field of view (degrees)
+    1,      // aspect ratio, set from the container by resize()
+    0.1,    // near clipping plane
+    1000    // far clipping plane
 );
+
+// Match the drawing buffer and camera to the container's current size.
+// Pixel density is capped at 2 so 3x phones don't render 9x the pixels.
+function resize() {
+    const w = container.clientWidth;
+    const h = container.clientHeight;
+    if (w === 0 || h === 0) return; // hidden or collapsed: keep the last size
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(w, h, false); // false: CSS controls the canvas's display size
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    renderer.render(scene, camera); // redraw now so the new size never shows a stretched frame
+}
+
+// Run resize work at most once per animation frame, however many events arrive.
+let resizeQueued = false;
+function queueResize() {
+    if (resizeQueued) return;
+    resizeQueued = true;
+    requestAnimationFrame(function() {
+        resizeQueued = false;
+        resize();
+    });
+}
+
+resize();
+new ResizeObserver(queueResize).observe(container);
+// Rotation usually resizes the container too, but some mobile browsers report the new size late.
+if (screen.orientation) screen.orientation.addEventListener('change', queueResize);
+else window.addEventListener('orientationchange', queueResize);
 
 // Starfield background.
 const textureLoader = new THREE.TextureLoader();
