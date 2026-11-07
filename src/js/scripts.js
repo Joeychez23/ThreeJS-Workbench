@@ -6,7 +6,8 @@ const DEBUG = new URLSearchParams(window.location.search).has('debug');
 
 // Image URLs, resolved by Parcel at build time.
 const stars = new URL('../img/stars.jpg', import.meta.url).href;
-const board = new URL('../img/chess-board.png', import.meta.url).href;
+// 1024x1024 crop of chess-board.png holding exactly the 8x8 squares (frame removed), so cell i spans 128px.
+const board = new URL('../img/chess-board.jpg', import.meta.url).href;
 
 // ---------------------------------------------------------------------------
 // Grid system
@@ -146,10 +147,12 @@ const planeMaterial = new THREE.MeshStandardMaterial({ color: 0xFFFFFF });
 const plane = new THREE.Mesh(planeGeometry, planeMaterial);
 scene.add(plane);
 const boardProperties = textureLoader.load(board);
-boardProperties.colorSpace = THREE.SRGBColorSpace;
-// Crop the texture to the 8x8 squares (drop the wooden frame) so the grid lines up with them.
-boardProperties.offset.set(0.095, 0.0905);
-boardProperties.repeat.set(0.8235, 0.8195);
+boardProperties.colorSpace = THREE.SRGBColorSpace; // sRGB so colors match the 2D board
+// The image is already cropped to the squares, so it maps 1:1 onto the plane and lines up with cellCenter().
+// Mipmaps keep it smooth when far away; anisotropy keeps it sharp at the camera's low viewing angle.
+boardProperties.generateMipmaps = true;
+boardProperties.minFilter = THREE.LinearMipmapLinearFilter;
+boardProperties.anisotropy = Math.min(renderer.capabilities.getMaxAnisotropy(), 8);
 plane.material.map = boardProperties;
 plane.rotation.x = -0.5 * Math.PI; // lay the plane flat (it's created standing up in XY)
 
