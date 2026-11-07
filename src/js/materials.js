@@ -66,7 +66,28 @@ function blobTexture(size = 64) {
 
 export const blob = blobTexture();
 
-export const gold = new THREE.MeshStandardMaterial({ color: 0xD4A63A, metalness: 0.8, roughness: 0.3 }); // crowns, collars, frame inlay (#412)
+export const gold = new THREE.MeshStandardMaterial({ color: 0xD4A63A, metalness: 0.8, roughness: 0.3 }); // crowns, collars, frame inlay
+
+// Board frame: darker than Black's walnut pieces so they still stand out against it; no rim, it never highlights.
+export const frameWood = wood(0x2E1B10, 0x000000);
+
+// Green baize table: speckled felt, tiled small so it reads as cloth up close.
+function feltTexture(size = 64) {
+    const data = new Uint8Array(size * size * 4);
+    for (let i = 0; i < size * size; i++) {
+        const v = 255 * (0.88 + 0.12 * Math.random());
+        data.set([v, v, v, 255], i * 4);
+    }
+    const texture = new THREE.DataTexture(data, size, size);
+    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(60, 60);
+    texture.magFilter = THREE.LinearFilter;
+    texture.needsUpdate = true;
+    return texture;
+}
+
+export const baize = new THREE.MeshStandardMaterial({ color: 0x1F5A32, map: feltTexture(), roughness: 1, metalness: 0 });
+export const BAIZE_FOG = 0x0E2A17; // the table's far edge fades into this, which is also the background
 
 // Highlights add a strong blue rim instead of lightening, so they show on maple as well as walnut.
 export const hovered = { maple: wood(MAPLE, HIGHLIGHT_RIM), walnut: wood(WALNUT, HIGHLIGHT_RIM) };

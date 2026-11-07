@@ -1,12 +1,13 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { createPiece, setPieceState, updateShadow } from './pieces.js';
+import { createSurroundings } from './board.js';
+import { BAIZE_FOG } from './materials.js';
 
 // Debug tools (dat.gui panel, key light helper) load only with ?debug in the URL.
 const DEBUG = new URLSearchParams(window.location.search).has('debug');
 
 // Image URLs, resolved by Parcel at build time.
-const stars = new URL('../img/stars.jpg', import.meta.url).href;
 // 1024x1024 crop of chess-board.png holding exactly the 8x8 squares (frame removed), so cell i spans 128px.
 const board = new URL('../img/chess-board.jpg', import.meta.url).href;
 
@@ -74,11 +75,10 @@ new ResizeObserver(queueResize).observe(container);
 if (screen.orientation) screen.orientation.addEventListener('change', queueResize);
 else window.addEventListener('orientationchange', queueResize);
 
-// Starfield background.
+// The baize table (board.js) fills the view; past it, fog fades into the same dark green as the background.
 const textureLoader = new THREE.TextureLoader();
-const background = textureLoader.load(stars);
-background.colorSpace = THREE.SRGBColorSpace;
-scene.background = background;
+scene.background = new THREE.Color(BAIZE_FOG);
+scene.fog = new THREE.Fog(BAIZE_FOG, 50, 150);
 
 // ---------------------------------------------------------------------------
 // Camera controls
@@ -220,6 +220,13 @@ boardProperties.anisotropy = Math.min(renderer.capabilities.getMaxAnisotropy(), 
 plane.material.map = boardProperties;
 plane.rotation.x = -0.5 * Math.PI; // lay the plane flat (it's created standing up in XY)
 
+// Walnut frame with gold inlay and a-h / 1-8 labels, on a baize table.
+const surroundings = createSurroundings(BOARD_SIZE);
+scene.add(surroundings.group);
+
+// Move the labels to the viewing side, like the 2D board's flip (called by the board-flip work in Phases 3/4).
+export const setBoardFlipped = surroundings.setFlipped;
+
 // Visible grid lines matching the 8x8 cells.
 const gridHelper = new THREE.GridHelper(BOARD_SIZE, GRID_DIVISIONS);
 gridHelper.position.y = 0.01; // just above the board to avoid z-fighting
@@ -238,9 +245,6 @@ scene.add(fillLight);
 const keyLight = new THREE.DirectionalLight(0xFFFFFF, 2.2);
 keyLight.position.set(-10, 25, 15);
 scene.add(keyLight);
-
-// White fog that thickens with distance.
-scene.fog = new THREE.FogExp2(0xFFFFFF, 0.01);
 
 // ---------------------------------------------------------------------------
 // Debug tools (?debug): key light helper and a GUI panel (top right) for the lights
